@@ -1,5 +1,5 @@
 """
-AI-drevet Weinstein-analyse pr. aktie ("Jarvis"-modulet).
+AI-drevet Weinstein-analyse pr. aktie ("ELVIS"-modulet).
 
 Når en aktie vælges i dashboardet, giver dette modul en konkret vurdering af
 price action ud fra Stan Weinsteins stage-model, baseret på tal der allerede

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Assembles JarvisTrader.app -- a self-contained, double-clickable macOS app
+# Assembles Elvis.app -- a self-contained, double-clickable macOS app
 # wrapping this dashboard. Safe to re-run any time after changing the
 # dashboard's source files; it always rebuilds Resources/app from scratch
 # from the canonical files below (server.py etc. stay the single source of
@@ -7,7 +7,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP="$HERE/JarvisTrader.app"
+APP="$HERE/Elvis.app"
 RESOURCES_APP="$APP/Contents/Resources/app"
 
 rm -rf "$APP"
@@ -21,13 +21,13 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleName</key><string>Jarvis Trader</string>
-	<key>CFBundleDisplayName</key><string>Jarvis Trader</string>
-	<key>CFBundleIdentifier</key><string>local.jarvistrader.app</string>
+	<key>CFBundleName</key><string>Elvis</string>
+	<key>CFBundleDisplayName</key><string>Elvis</string>
+	<key>CFBundleIdentifier</key><string>local.elvis.app</string>
 	<key>CFBundleVersion</key><string>1.0</string>
 	<key>CFBundleShortVersionString</key><string>1.0</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleExecutable</key><string>JarvisTrader</string>
+	<key>CFBundleExecutable</key><string>Elvis</string>
 	<key>LSMinimumSystemVersion</key><string>10.13</string>
 	<key>NSHighResolutionCapable</key><true/>
 	<key>LSApplicationCategoryType</key><string>public.app-category.finance</string>
@@ -35,7 +35,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 </plist>
 EOF
 
-cat > "$APP/Contents/MacOS/JarvisTrader" <<'EOF'
+cat > "$APP/Contents/MacOS/Elvis" <<'EOF'
 #!/bin/bash
 # Launcher: starts the dashboard's own server.py and opens the browser once
 # it responds. Runs via `exec` so this process *is* the app as far as the
@@ -46,7 +46,7 @@ cd "$DIR" || exit 1
 
 PYTHON="$(command -v python3 || true)"
 if [ -z "$PYTHON" ]; then
-  osascript -e 'display alert "Python 3 mangler" message "Jarvis Trader kraever Python 3, som ikke blev fundet paa denne Mac. Installer det fra python.org og proev igen." as critical' >/dev/null 2>&1
+  osascript -e 'display alert "Python 3 mangler" message "Elvis kraever Python 3, som ikke blev fundet paa denne Mac. Installer det fra python.org og proev igen." as critical' >/dev/null 2>&1
   exit 1
 fi
 
@@ -55,7 +55,7 @@ export PORT
 
 LOG_DIR="$HOME/Library/Logs"
 mkdir -p "$LOG_DIR" 2>/dev/null || LOG_DIR="/tmp"
-LOG_FILE="$LOG_DIR/JarvisTrader.log"
+LOG_FILE="$LOG_DIR/Elvis.log"
 
 if curl -s -o /dev/null "http://localhost:$PORT/api/meta"; then
   # already running (e.g. started earlier from a terminal) -- just show it
@@ -75,6 +75,6 @@ fi
 
 exec "$PYTHON" server.py >>"$LOG_FILE" 2>&1
 EOF
-chmod +x "$APP/Contents/MacOS/JarvisTrader"
+chmod +x "$APP/Contents/MacOS/Elvis"
 
 echo "Built $APP"
