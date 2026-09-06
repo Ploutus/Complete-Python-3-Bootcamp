@@ -444,6 +444,48 @@ class Market:
             "bars": bars,
         }
 
+    def analysis_facts(self, ticker):
+        """Compact, structured technical facts for one ticker -- the single source
+        of truth fed to both the LLM prompt and the rule-based analyzer in
+        ai_analyst.py, so both explanations are grounded in the same numbers."""
+        ticker = ticker.upper()
+        bars = self.daily[ticker]
+        weekly = self.weekly[ticker]
+        closes_w = [w["close"] for w in weekly]
+        ma = _sma(closes_w, 30)
+        last_ma = ma[-1]
+        ma_10w_ago = ma[-11] if len(ma) > 10 else None
+        ma_slope_pct = (
+            round(((last_ma - ma_10w_ago) / ma_10w_ago) * 100, 1)
+            if last_ma and ma_10w_ago else None
+        )
+
+        last12 = weekly[-12:]
+        last52 = weekly[-52:]
+        meta = self.meta[ticker]
+        stage = self.stage[ticker]
+
+        return {
+            "ticker": ticker,
+            "name": meta["name"],
+            "sector": meta["sector"],
+            "price": bars[-1]["close"],
+            "day_chg_pct": round((bars[-1]["close"] / bars[-2]["close"] - 1) * 100, 2),
+            "week_chg_pct": round((closes_w[-1] / closes_w[-2] - 1) * 100, 2) if len(closes_w) > 1 else 0.0,
+            "stage": stage,
+            "stage_label": STAGE_LABELS[stage],
+            "rs_rating": self.rs_today.get(ticker, 50),
+            "rs_rating_5d_ago": self.rs_week_ago.get(ticker, 50),
+            "ma30w": round(last_ma, 2) if last_ma is not None else None,
+            "ma30w_slope_10w_pct": ma_slope_pct,
+            "high_12w": round(max(w["high"] for w in last12), 2),
+            "low_12w": round(min(w["low"] for w in last12), 2),
+            "high_52w": round(max(w["high"] for w in last52), 2),
+            "low_52w": round(min(w["low"] for w in last52), 2),
+            "data_source": self.price_source.get(ticker, "simulated"),
+            "recent_13f": self.thirteen_f_for_ticker(ticker)[-3:],
+        }
+
     # ------------------------------------------------------------- 13F ----
     def _quarter_labels_back(self, n):
         """Last `n` fully-completed calendar quarters (13F is filed ~45 days after

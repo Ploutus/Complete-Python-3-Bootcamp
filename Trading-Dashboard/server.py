@@ -11,6 +11,7 @@ import shutil
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+import ai_analyst
 from data_engine import get_market, reset_market_cache
 from providers import YahooFinanceProvider, SecEdgarProvider, CACHE_DIR
 
@@ -75,6 +76,7 @@ class Handler(BaseHTTPRequestHandler):
                     "universe_size": len(market.meta),
                     "sectors": sorted(set(m["sector"] for m in market.meta.values())),
                     "sources": sources,
+                    "ai_analysis": ai_analyst.status(),
                     "disclaimer": (
                         "Priser: Yahoo Finance når muligt, ellers simuleret. "
                         "13F: SEC EDGAR når muligt, ellers simuleret. "
@@ -108,6 +110,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"ticker": ticker.upper(), "holdings": get_market().thirteen_f_for_ticker(ticker)})
             elif path == "/api/insights":
                 self._send_json({"insights": get_market().insights()})
+            elif path.startswith("/api/analysis/"):
+                ticker = path.rsplit("/", 1)[-1].upper()
+                market = get_market()
+                if ticker not in market.meta:
+                    self._send_json({"error": f"unknown ticker {ticker}"}, 404)
+                else:
+                    facts = market.analysis_facts(ticker)
+                    result = ai_analyst.analyze_cached(facts)
+                    self._send_json({"ticker": ticker, **result})
             elif path.startswith("/api/"):
                 self._send_json({"error": "unknown endpoint"}, 404)
             else:

@@ -213,6 +213,13 @@
     const meta = state.rows.find((r) => r.ticker === ticker);
     el("detailTitle").textContent = `${ticker} — ${meta ? meta.name : ""}`;
 
+    // Fired independently: the AI analysis can take a few seconds (LLM call)
+    // and must never block the chart/13F panels from showing immediately.
+    renderAiAnalysisLoading();
+    fetchJSON(`/api/analysis/${ticker}`)
+      .then((data) => renderAiAnalysis(ticker, data))
+      .catch(() => renderAiAnalysisError(ticker));
+
     try {
       const [ohlc, f13] = await Promise.all([
         fetchJSON(`/api/ohlc/${ticker}`),
@@ -225,6 +232,39 @@
     } catch (e) {
       console.error(e);
     }
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function renderAiAnalysisLoading() {
+    el("aiSourceBadge").textContent = "";
+    el("aiSourceBadge").className = "ai-source-badge";
+    el("aiAnalysisBox").innerHTML = `<div class="ai-loading">Analyserer price action</div>`;
+  }
+
+  function renderAiAnalysis(ticker, data) {
+    if (state.selectedTicker !== ticker) return; // user already moved on — stale response
+    const badge = el("aiSourceBadge");
+    if (data.source === "llm") {
+      badge.textContent = `KI · ${data.model || "Claude"}`;
+      badge.className = "ai-source-badge ai-llm";
+    } else {
+      badge.textContent = "REGELBASERET";
+      badge.className = "ai-source-badge ai-rule";
+    }
+    el("aiAnalysisBox").innerHTML = `
+      <div>${escapeHtml(data.summary)}</div>
+      <span class="ai-disclaimer">Teknisk analyse, ikke finansiel rådgivning.${data.cached ? " (cachet)" : ""}</span>
+    `;
+  }
+
+  function renderAiAnalysisError(ticker) {
+    if (state.selectedTicker !== ticker) return;
+    el("aiAnalysisBox").innerHTML = `<div class="ai-error">Kunne ikke hente AI-analyse for ${ticker}.</div>`;
   }
 
   function renderDetailMeta(ohlc, meta) {
