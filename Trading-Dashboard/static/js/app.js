@@ -9,6 +9,8 @@
     selectedTicker: null,
     activeTab: "screener",
     thirteenF: null,
+    meta: null,
+    lastOhlcBars: null,
   };
 
   const STAGE_ORDER = [2, 1, 3, 4]; // advancing first, then basing, topping, declining
@@ -138,7 +140,7 @@
       if (r.ticker === state.selectedTicker) tr.classList.add("selected");
       tr.innerHTML = `
         <td><div class="rs-cell"><span class="rs-num">${r.rs_rating}</span><div class="rs-bar-track"><div class="rs-bar-fill" style="width:${r.rs_rating}%"></div></div></div></td>
-        <td><b>${r.ticker}</b></td>
+        <td><span class="src-dot ${r.data_source}" title="${r.data_source === "live" ? "Live kurs (Yahoo Finance)" : "Simuleret kurs"}"></span><b>${r.ticker}</b></td>
         <td>${r.name}</td>
         <td>${r.sector}</td>
         <td><span class="stage-pill stage-${r.stage}">${r.stage_label.split("·")[0].trim()}</span></td>
@@ -217,6 +219,7 @@
         fetchJSON(`/api/13f/${ticker}`),
       ]);
       renderDetailMeta(ohlc, meta);
+      state.lastOhlcBars = ohlc.bars;
       drawChart(el("chartCanvas"), ohlc.bars);
       renderDetail13f(f13.holdings);
     } catch (e) {
@@ -225,11 +228,13 @@
   }
 
   function renderDetailMeta(ohlc, meta) {
+    const srcLabel = ohlc.data_source === "live" ? "Live (Yahoo Finance)" : "Simuleret";
     el("detailMeta").innerHTML = `
       <span>Sektor: <b>${ohlc.sector}</b></span>
       <span>Stage: <b>${ohlc.stage_label}</b></span>
       <span>RS Rating: <b>${ohlc.rs_rating}</b></span>
       ${meta ? `<span>1D: <b class="${cls(meta.day_chg_pct)}">${fmtPct(meta.day_chg_pct)}</b></span>` : ""}
+      <span><span class="src-dot ${ohlc.data_source}"></span>${srcLabel}</span>
     `;
   }
 
@@ -360,12 +365,88 @@
     });
   }
 
+  // ---------------- Data source badge ----------------
+  function renderDataBadge() {
+    const badge = el("dataBadge");
+    if (!state.meta) return;
+    const { prices, thirteen_f } = state.meta.sources;
+    const totalLive = prices.live + thirteen_f.live;
+    const totalAll = prices.live + prices.simulated + thirteen_f.live + thirteen_f.simulated;
+    badge.title = `Kurser: ${prices.live} live / ${prices.simulated} simuleret  ·  13F: ${thirteen_f.live} live / ${thirteen_f.simulated} simuleret`;
+    if (totalLive === 0) {
+      badge.textContent = "SIMULERET DATA";
+      badge.className = "badge badge-demo";
+    } else if (totalLive === totalAll) {
+      badge.textContent = "LIVE DATA";
+      badge.className = "badge badge-live";
+    } else {
+      badge.textContent = `BLANDET · ${prices.live}/${prices.live + prices.simulated} LIVE`;
+      badge.className = "badge badge-mixed";
+    }
+  }
+
+  async function loadAll() {
+    const [universe, sectors, insights, f13, meta] = await Promise.all([
+      fetchJSON("/api/universe"),
+      fetchJSON("/api/sectors"),
+      fetchJSON("/api/insights"),
+      fetchJSON("/api/13f"),
+      fetchJSON("/api/meta"),
+    ]);
+    state.rows = universe.rows;
+    state.sectors = sectors.sectors;
+    state.thirteenF = f13;
+    state.meta = meta;
+
+    el("insightsTickerInner").textContent = insights.insights.join("     •     ");
+    renderDataBadge();
+    render();
+    renderThirteenF();
+  }
+
+  // ---------------- Refresh button ----------------
+  function bindRefresh() {
+    el("refreshBtn").addEventListener("click", async () => {
+      const btn = el("refreshBtn");
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "⟳ HENTER LIVE DATA…";
+      try {
+        await fetchJSON("/api/refresh?force=1");
+        await loadAll();
+        if (state.selectedTicker) selectTicker(state.selectedTicker);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    });
+  }
+
+  // ---------------- Resize ----------------
+  function bindResize() {
+    let timer = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (state.lastOhlcBars) drawChart(el("chartCanvas"), state.lastOhlcBars);
+      }, 150);
+    });
+  }
+
   // ---------------- Wiring ----------------
   function render() {
     renderStageCards();
     renderSectorList();
     renderFilterBar();
     renderGrid();
+  }
+
+  function showError(message) {
+    el("loadingOverlay").classList.add("hidden");
+    el("errorOverlay").classList.remove("hidden");
+    el("errorText").textContent = message;
   }
 
   async function boot() {
@@ -379,27 +460,24 @@
     });
     bindSort();
     bindSearch();
+    bindRefresh();
+    bindResize();
+    el("retryBtn").addEventListener("click", () => window.location.reload());
 
-    const [universe, sectors, insights, f13] = await Promise.all([
-      fetchJSON("/api/universe"),
-      fetchJSON("/api/sectors"),
-      fetchJSON("/api/insights"),
-      fetchJSON("/api/13f"),
-    ]);
-    state.rows = universe.rows;
-    state.sectors = sectors.sectors;
-    state.thirteenF = f13;
+    try {
+      await loadAll();
+    } catch (e) {
+      console.error(e);
+      showError(String(e));
+      return;
+    }
 
-    el("insightsTickerInner").textContent = insights.insights.join("     •     ");
-
-    render();
-    renderThirteenF();
-
-    if (state.rows.length) selectTicker(state.rows[0].ticker);
+    if (state.rows.length) await selectTicker(state.rows[0].ticker);
+    el("loadingOverlay").classList.add("hidden");
   }
 
   boot().catch((e) => {
     console.error(e);
-    document.body.innerHTML = `<pre style="color:#ff4d4f;padding:20px">Fejl ved indlæsning af dashboard: ${e}</pre>`;
+    showError(String(e));
   });
 })();

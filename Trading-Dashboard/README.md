@@ -5,11 +5,24 @@ Weinstein's 4-stage model), IBD-style RS Ratings, sector strength
 rankings, 13F institutional filings, and weekly OHLC charts — all in one
 dark, dense, keyboard-friendly screen.
 
-> **⚠️ SIMULATED DATA.** This sandbox has no outbound network access to
-> market-data providers or SEC EDGAR, so all prices, RS ratings, stage
-> classifications and 13F holdings here are synthetically generated
-> (`data_engine.py`). The UI carries a permanent "SIMULERET DATA" badge for
-> this reason. See **Plugging in real data** below to wire up live feeds.
+Prices come from **Yahoo Finance** and 13F holdings from **SEC EDGAR**
+(both free, no API key) whenever the machine running it has outbound
+internet access. Anything that can't be fetched — a ticker, an
+institution, or everything if you're fully offline — falls back to a
+built-in market simulation, per-ticker/per-institution, so the dashboard
+never breaks. A badge in the top bar always tells you which mode you're
+actually looking at (`LIVE DATA` / `SIMULERET DATA` / `BLANDET`), and a
+small dot next to each ticker/13F row shows its own source.
+
+> **Built and tested in a sandbox with zero outbound network access**
+> (not even to `example.com`). The live-fetch code against Yahoo Finance
+> and SEC EDGAR is written to their documented, stable public API shapes
+> and covered by offline unit tests against realistic fixture payloads
+> (`tests/test_providers.py`), but the actual HTTP round-trips have not
+> been exercised against the real internet from this environment. The
+> automatic per-item fallback means the dashboard is fully usable either
+> way — **please do a quick local smoke test** (run it with internet
+> access and check the top-bar badge turns green) after pulling this.
 
 ## Run it
 
@@ -22,13 +35,42 @@ python3 server.py
 # -> http://localhost:8000
 ```
 
+Run the offline test suite any time with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+## Data modes
+
+Controlled by the `DATA_MODE` environment variable:
+
+- `auto` (default) — tries live data for every ticker and institution,
+  falling back to simulation only for the ones that fail (no network, a
+  ticker Yahoo doesn't recognize, a filer that couldn't be matched, …).
+  A single fast connectivity probe (~6s timeout) is done once per
+  provider up front, so being fully offline costs one short delay, not
+  one per ticker.
+- `simulated` — skip all network calls entirely (fast, fully
+  deterministic, good for demos/CI/this sandbox).
+
+```bash
+DATA_MODE=simulated python3 server.py
+```
+
+Live responses are cached to disk under `.cache/` (prices: 12h,
+resolved institution CIKs: 30 days) so restarts don't re-hit the network
+unnecessarily. Click **⟳ OPDATER** in the top bar to force a live refresh
+(add `?force=1` semantics automatically — it also wipes `.cache/` and
+re-probes connectivity, in case you started offline and got online since).
+
 ## What it does
 
-- **Stage Analysis** — every one of the 55 simulated large-caps is
-  classified into Weinstein Stage 1 (Basing), 2 (Advancing), 3 (Topping)
-  or 4 (Declining), based on the weekly close vs. its 30-week moving
-  average and that average's slope. Click a stage card to filter the
-  screener and see which sectors have the most names in that stage.
+- **Stage Analysis** — every stock is classified into Weinstein Stage 1
+  (Basing), 2 (Advancing), 3 (Topping) or 4 (Declining), based on the
+  weekly close vs. its 30-week moving average and that average's slope.
+  Click a stage card to filter the screener and see which sectors have
+  the most names in that stage.
 - **RS Rating** — an IBD-style 1–99 Relative Strength rating. A raw score
   is built from weighted trailing returns (40% 3-month, 20% each of
   6/9/12-month), then every stock is percentile-ranked against the whole
@@ -36,10 +78,10 @@ python3 server.py
 - **Sector Strength** — sectors are ranked by their members' average RS
   Rating, with a day-over-day delta arrow so you can see who's
   strengthening or fading. Click a sector to drill into its top names.
-- **13F Filings** — a synthetic institutional-ownership table (10 well
-  known fund names) across the last 3 quarters, with New/Increased/
-  Decreased/Sold Out tags. Click any row to jump straight to that stock's
-  chart.
+- **13F Filings** — institutional-ownership table (10 well-known funds)
+  across the last 3 completed quarters, with New/Increased/Decreased/Sold
+  Out tags, sourced from SEC EDGAR's Form 13F-HR filings when reachable.
+  Click any row to jump straight to that stock's chart.
 - **Weekly OHLC chart** — click any ticker to render a dependency-free
   `<canvas>` candlestick chart (2 years of weekly bars) with the 30-week
   MA overlay used for stage classification.
@@ -51,49 +93,72 @@ python3 server.py
 
 ```
 Trading-Dashboard/
-  data_engine.py   # synthetic OHLCV simulation + RS rating + stage + 13F
+  providers.py     # Yahoo Finance + SEC EDGAR clients (stdlib urllib only),
+                    # fail-soft: every method returns None on any error
+  data_engine.py   # Market: live-with-fallback OHLCV, RS rating, stage,
+                    # sector aggregation, 13F, per-item source tracking
   server.py        # stdlib http.server backend, serves /api/* and static/
   static/
     index.html
     css/terminal.css
     js/app.js      # fetches the API, renders grids/panels, draws the chart
+  tests/           # offline unit tests (fixtures, no network)
+  .cache/          # disk cache for live fetches (gitignored)
 ```
 
-The backend keeps a single cached `Market` snapshot (`data_engine.get_market()`)
-built once at startup. All analytics (RS rating percentile ranking, stage
-classification, sector aggregation) run in `data_engine.py` — the frontend
-only renders what it's given and does light client-side filtering/sorting
-on the ~55-row universe.
+`Market` (in `data_engine.py`) builds one snapshot per ticker: try Yahoo
+Finance first (unless `DATA_MODE=simulated`), and only generate a
+synthetic series for that specific ticker if the live fetch fails. 13F
+works the same way per institution. All analytics (RS rating percentile
+ranking, stage classification, sector aggregation, `_finalize_holdings`)
+run identically regardless of whether the underlying data is live or
+simulated — they only ever see plain OHLCV bars / holdings rows.
 
 ### API
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/meta` | as-of date, universe size, disclaimer |
-| `GET /api/universe` | all stocks with price, RS rating, stage, sector |
+| `GET /api/meta` | as-of date, universe size, disclaimer, live/simulated counts |
+| `GET /api/universe` | all stocks with price, RS rating, stage, sector, `data_source` |
 | `GET /api/sectors` | sector strength ranking + stage counts + top names |
 | `GET /api/ohlc/<ticker>` | weekly OHLCV bars + 30W MA for the chart |
 | `GET /api/13f` | full 13F holdings table (last 3 quarters) |
 | `GET /api/13f/<ticker>` | holdings history for one ticker |
 | `GET /api/insights` | templated "Jarvis" commentary strings |
+| `GET /api/refresh` | re-probes connectivity and rebuilds the snapshot; `?force=1` also wipes `.cache/` |
 
-## Plugging in real data
+## How the live providers work
 
-Swap the simulation for live data by replacing `Market._build()` in
-`data_engine.py` with real fetches, keeping the rest of the analytics
-(`_raw_rs_score`, `_percentile_ranks`, `_classify_stage`, `sector_summary`,
-`insights`) as-is since they only need `self.closes[ticker] -> [close, ...]`
-and `self.daily[ticker] -> [{open,high,low,close,volume}, ...]`:
+**`YahooFinanceProvider`** (`providers.py`) hits Yahoo's public chart
+endpoint (`query1.finance.yahoo.com/v8/finance/chart/<ticker>`), parses
+daily OHLCV out of the JSON, and requires at least ~260 daily bars
+(enough for the 12-month RS lookback and 30-week MA) or it returns `None`.
 
-- **Prices**: a daily-bar OHLCV provider (Yahoo Finance, Alpha Vantage,
-  IEX, Polygon, your broker's API, …) for however many tickers you want to
-  track. You need at least ~13 months of daily history per ticker for the
-  RS Rating lookbacks and 40+ weeks for stage classification.
-- **13F holdings**: SEC EDGAR's public, free `data.sec.gov/submissions/`
-  and Form 13F XML filings (no key required, but requires a descriptive
-  `User-Agent` header per SEC's fair-access policy). Replace
-  `Market.thirteen_f()` with a parser over the filers/tickers you care
-  about.
-- Keep a refresh job (cron / background thread) that rebuilds the
-  `Market` singleton on a schedule (13F is quarterly with a 45-day lag;
-  daily prices refresh once a day is enough for RS/stage purposes).
+**`SecEdgarProvider`** does the full real pipeline: resolve an
+institution's CIK via EDGAR's company-search atom feed (`www.sec.gov/
+cgi-bin/browse-edgar?action=getcompany&type=13F-HR`), list its recent
+`13F-HR` filings via `data.sec.gov/submissions/CIK{cik}.json`, fetch each
+filing's information-table XML, parse `nameOfIssuer` / `cusip` / `value` /
+`sshPrnamt` per holding, and fuzzy-match the issuer name (stripping
+`INC`/`CORP`/`CL A`/etc.) against our ticker universe's company names —
+13F filings report CUSIPs and issuer names, not ticker symbols, and there
+is no free CUSIP↔ticker mapping service, so name-matching is the
+practical approach for a small, fixed universe like this one. A
+descriptive `User-Agent` is sent on every SEC request per their
+fair-access policy, with a small delay between requests.
+
+Both providers do one cheap "is this reachable" probe before doing any
+real work (`is_available()`), so a fully offline run fails fast instead of
+timing out once per ticker/institution — confirmed here: a full offline
+`Market` build (55 tickers + 10 institutions) completes in ~1 second.
+
+### Extending it
+
+- **More tickers/sectors**: add to `SECTORS` in `data_engine.py` — no
+  other code changes needed, Yahoo Finance covers essentially any listed
+  ticker.
+- **More institutions**: add the fund's registered name to `INSTITUTIONS`;
+  `SecEdgarProvider.resolve_cik` looks it up automatically.
+- **A different price provider**: implement the same
+  `fetch_daily(ticker) -> [{date, open, high, low, close, volume}] | None`
+  contract and swap it in `Market._build()`.

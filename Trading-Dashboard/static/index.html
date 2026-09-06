@@ -7,6 +7,20 @@
 <link rel="stylesheet" href="/css/terminal.css">
 </head>
 <body>
+  <div id="loadingOverlay" class="overlay">
+    <div class="overlay-box">
+      <div class="spinner"></div>
+      <div id="loadingText">INDLÆSER MARKEDSDATA…</div>
+    </div>
+  </div>
+  <div id="errorOverlay" class="overlay hidden">
+    <div class="overlay-box">
+      <div class="overlay-error">✕ FEJL VED INDLÆSNING</div>
+      <div id="errorText" class="overlay-error-detail"></div>
+      <button id="retryBtn" class="clear-filter">PRØV IGEN</button>
+    </div>
+  </div>
+
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark">◆</span>
@@ -18,7 +32,8 @@
     </div>
     <div class="topbar-right">
       <span id="clock" class="clock">--:--:--</span>
-      <span class="badge badge-demo" title="Alle kurser, RS-ratings, stages og 13F-data er simulerede">SIMULERET DATA</span>
+      <button id="refreshBtn" class="refresh-btn" title="Hent live data igen (Yahoo Finance / SEC EDGAR)">⟳ OPDATER</button>
+      <span id="dataBadge" class="badge badge-demo" title="Indlæser…">…</span>
     </div>
   </header>
 

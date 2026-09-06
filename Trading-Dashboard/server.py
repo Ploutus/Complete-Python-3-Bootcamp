@@ -7,10 +7,12 @@ swap the simulated data engine for a real market-data / SEC EDGAR feed.
 """
 import json
 import os
+import shutil
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
-from data_engine import get_market
+from data_engine import get_market, reset_market_cache
+from providers import YahooFinanceProvider, SecEdgarProvider, CACHE_DIR
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -67,15 +69,27 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/meta":
                 market = get_market()
+                sources = market.source_summary()
                 self._send_json({
                     "as_of": market.end_date.strftime("%Y-%m-%d"),
                     "universe_size": len(market.meta),
                     "sectors": sorted(set(m["sector"] for m in market.meta.values())),
+                    "sources": sources,
                     "disclaimer": (
-                        "SIMULATED DATA — prices, RS ratings, stages and 13F "
-                        "holdings are synthetically generated for demo purposes."
+                        "Priser: Yahoo Finance når muligt, ellers simuleret. "
+                        "13F: SEC EDGAR når muligt, ellers simuleret. "
+                        "Se badge og kilde-indikator for hver række."
                     ),
                 })
+            elif path == "/api/refresh":
+                query = parse_qs(parsed.query)
+                if query.get("force", ["0"])[0] == "1":
+                    shutil.rmtree(CACHE_DIR, ignore_errors=True)
+                YahooFinanceProvider._available = None
+                SecEdgarProvider._available = None
+                reset_market_cache()
+                market = get_market()
+                self._send_json({"status": "ok", **market.source_summary()})
             elif path == "/api/universe":
                 self._send_json({"rows": get_market().universe_rows()})
             elif path == "/api/sectors":

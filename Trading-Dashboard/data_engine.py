@@ -1,13 +1,18 @@
 """
-Synthetic market data engine for the Trading Dashboard demo.
+Market data engine for the Trading Dashboard.
 
-IMPORTANT: All prices, RS ratings, stage classifications and 13F holdings
-produced here are SIMULATED. No live market data or real SEC filings are
-fetched (this environment has no outbound access to Yahoo Finance / SEC
-EDGAR). The module is written so the simulation can be swapped for a real
-provider later -- see `README.md` -> "Plugging in real data".
+Prices come from Yahoo Finance and 13F holdings from SEC EDGAR when the
+process has outbound internet access (`providers.py`); any ticker or
+institution that can't be fetched live falls back to a synthetic
+simulation so the dashboard never breaks. See README.md -> "Data modes".
 
-Analytics implemented (deliberately simple, documented formulas):
+Set DATA_MODE=simulated to skip all network calls (fast, fully offline).
+Default DATA_MODE=auto tries live data and falls back per-ticker /
+per-institution.
+
+Analytics implemented (deliberately simple, documented formulas), used
+identically regardless of whether the underlying prices are live or
+simulated:
 
   * RS Rating: IBD-style relative strength rating. A raw score is built
     from weighted trailing returns (3/6/9/12 months), then every stock in
@@ -22,12 +27,15 @@ Analytics implemented (deliberately simple, documented formulas):
         Stage 1 (Basing)      -> price below/around MA30W, MA flattening
 """
 import hashlib
-import math
+import os
 import random
 import statistics
+import threading
 from datetime import datetime, timedelta
 
-TRADING_DAYS = 760  # ~3 years of business days
+from providers import YahooFinanceProvider, SecEdgarProvider, quarter_sort_key
+
+TRADING_DAYS = 760  # ~3 years of business days, used for the synthetic calendar
 QUARTER_LABELS_BACK = 3
 
 SECTORS = {
@@ -201,14 +209,13 @@ def _sma(values, window):
     return out
 
 
-def _weekly_bars(daily_bars, dates):
-    """Resample daily OHLCV into Friday-ending weekly bars."""
+def _weekly_bars(daily_bars):
+    """Resample date-tagged daily OHLCV bars (ascending, chronological) into weekly bars."""
     weeks = []
     cur = None
-    cur_dates = []
-    for bar, d in zip(daily_bars, dates):
-        iso_year, iso_week, _ = d.isocalendar()
-        key = (iso_year, iso_week)
+    for bar in daily_bars:
+        d = bar["date"]
+        key = d.isocalendar()[:2]
         if cur is None or cur["key"] != key:
             if cur is not None:
                 weeks.append(cur)
@@ -269,7 +276,7 @@ def _classify_stage(weekly_closes):
     ma_now = ma[-1]
     ma_prev = ma[-10]
     slope = (ma_now - ma_prev) / ma_prev if ma_prev else 0.0
-    above = price >= ma_now
+    above = price > ma_now
     if above and slope > 0.01:
         return 2
     if above and slope <= 0.01:
@@ -279,35 +286,82 @@ def _classify_stage(weekly_closes):
     return 1
 
 
-class Market:
-    """Builds and caches one full synthetic universe snapshot."""
+def _finalize_holdings(raw_rows):
+    """Groups raw {filer, ticker, quarter, shares, value} rows by (filer, ticker),
+    sorts them chronologically and derives change_pct / action. Shared by both the
+    live SEC EDGAR path and the synthetic fallback so both produce identical shapes."""
+    by_key = {}
+    for r in raw_rows:
+        by_key.setdefault((r["filer"], r["ticker"]), []).append(r)
 
-    def __init__(self, seed=1337, end_date=None):
+    out = []
+    for rows in by_key.values():
+        rows.sort(key=lambda r: quarter_sort_key(r["quarter"]))
+        prev_shares = None
+        for r in rows:
+            shares = r["shares"]
+            if prev_shares is None:
+                action, chg = "Held", 0.0
+            elif prev_shares == 0 and shares > 0:
+                action, chg = "New", 100.0
+            elif shares == 0 and prev_shares > 0:
+                action, chg = "Sold Out", -100.0
+            else:
+                chg = round(((shares - prev_shares) / prev_shares) * 100, 1) if prev_shares else 0.0
+                action = "Increased" if chg > 2 else "Decreased" if chg < -2 else "Held"
+            out.append({**r, "change_pct": chg, "action": action})
+            prev_shares = shares
+    return out
+
+
+class Market:
+    """Builds and caches one full market snapshot (live where possible, else simulated)."""
+
+    def __init__(self, seed=1337, end_date=None, mode=None):
         self.seed = seed
         self.end_date = end_date or datetime.utcnow()
+        self.mode = mode or os.environ.get("DATA_MODE", "auto")
         self.dates = _trading_dates(TRADING_DAYS, self.end_date)
+        self._thirteenf_cache = None
         self._build()
 
+    # ------------------------------------------------------------ prices --
     def _build(self):
         rng = random.Random(self.seed)
-        self.daily = {}
         self.meta = {}
+        self.daily = {}
+        self.price_source = {}
+
         for sector, stocks in SECTORS.items():
             sector_returns = _sector_factor(TRADING_DAYS, _seed_for(sector + str(self.seed)))
             for ticker, name in stocks:
-                base_price = rng.uniform(35, 480)
-                beta = rng.uniform(0.7, 1.4)
-                bars = _stock_series(ticker, base_price, sector_returns, beta)
+                self.meta[ticker] = {"name": name, "sector": sector}
+
+                bars = None
+                if self.mode != "simulated":
+                    bars = YahooFinanceProvider.fetch_daily(ticker)
+
+                if bars:
+                    self.price_source[ticker] = "live"
+                else:
+                    base_price = rng.uniform(35, 480)
+                    beta = rng.uniform(0.7, 1.4)
+                    bars = _stock_series(ticker, base_price, sector_returns, beta)
+                    for bar, d in zip(bars, self.dates):
+                        bar["date"] = d
+                    self.price_source[ticker] = "simulated"
+
                 self.daily[ticker] = bars
-                self.meta[ticker] = {"name": name, "sector": sector, "beta": round(beta, 2)}
 
         self.closes = {t: [b["close"] for b in bars] for t, bars in self.daily.items()}
-        self.weekly = {t: _weekly_bars(bars, self.dates) for t, bars in self.daily.items()}
+        self.weekly = {t: _weekly_bars(bars) for t, bars in self.daily.items()}
 
-        last_idx = TRADING_DAYS - 1
-        raw_today = {t: _raw_rs_score(c, last_idx) for t, c in self.closes.items()}
-        raw_prev = {t: _raw_rs_score(c, last_idx - 1) for t, c in self.closes.items()}
-        raw_week_ago = {t: _raw_rs_score(c, last_idx - 5) for t, c in self.closes.items()}
+        raw_today, raw_prev, raw_week_ago = {}, {}, {}
+        for t, closes in self.closes.items():
+            n = len(closes)
+            raw_today[t] = _raw_rs_score(closes, n - 1)
+            raw_prev[t] = _raw_rs_score(closes, n - 2) if n >= 2 else None
+            raw_week_ago[t] = _raw_rs_score(closes, n - 6) if n >= 6 else None
         self.rs_today = _percentile_ranks(raw_today)
         self.rs_prev = _percentile_ranks(raw_prev)
         self.rs_week_ago = _percentile_ranks(raw_week_ago)
@@ -337,6 +391,7 @@ class Market:
                 "stage": stage,
                 "stage_label": STAGE_LABELS[stage],
                 "volume": last["volume"],
+                "data_source": self.price_source.get(t, "simulated"),
             })
         rows.sort(key=lambda r: r["rs_rating"], reverse=True)
         return rows
@@ -361,70 +416,97 @@ class Market:
             "ticker": ticker, "name": meta["name"], "sector": meta["sector"],
             "stage": self.stage[ticker], "stage_label": STAGE_LABELS[self.stage[ticker]],
             "rs_rating": self.rs_today.get(ticker, 50),
+            "data_source": self.price_source.get(ticker, "simulated"),
             "bars": bars,
         }
 
-    def thirteen_f(self):
-        """Synthetic 13F institutional holdings across the last few quarters."""
-        rng = random.Random(_seed_for("13f-" + str(self.seed)))
-        today = self.end_date
-        quarter_end = datetime(today.year, ((today.month - 1) // 3) * 3 + 1, 1) - timedelta(days=1)
-        quarters = []
-        q = quarter_end
-        for _ in range(QUARTER_LABELS_BACK):
-            label = f"Q{((q.month - 1)//3)+1} {q.year}"
-            quarters.append(label)
-            first_of_q = datetime(q.year, ((q.month - 1)//3)*3 + 1, 1)
-            q = first_of_q - timedelta(days=1)
-        quarters.reverse()  # oldest -> newest
+    # ------------------------------------------------------------- 13F ----
+    def _quarter_labels_back(self, n):
+        """Last `n` fully-completed calendar quarters (13F is filed ~45 days after
+        quarter end, so the current in-progress quarter is never included), oldest first."""
+        q = (self.end_date.month - 1) // 3 + 1
+        y = self.end_date.year
+        q -= 1
+        while q <= 0:
+            q += 4
+            y -= 1
+        labels = []
+        for i in range(n):
+            yy, qq = y, q - i
+            while qq <= 0:
+                qq += 4
+                yy -= 1
+            labels.append(f"Q{qq} {yy}")
+        labels.reverse()
+        return labels
 
+    def _synthetic_raw_holdings_for(self, institution, quarters):
+        inst_rng = random.Random(_seed_for(institution + str(self.seed)))
         tickers = list(self.meta.keys())
-        holdings = []
-        for inst in INSTITUTIONS:
-            inst_rng = random.Random(_seed_for(inst + str(self.seed)))
-            picks = inst_rng.sample(tickers, k=inst_rng.randint(12, 22))
-            for t in picks:
-                price = self.closes[t][-1]
-                shares_prev = inst_rng.randint(200_000, 9_000_000)
-                for qi, label in enumerate(quarters):
-                    action_roll = inst_rng.random()
-                    if qi == 0:
-                        shares = shares_prev
-                        action = "Held"
-                        chg_pct = 0.0
-                    else:
-                        if action_roll < 0.12:
-                            shares = 0
-                            action = "Sold Out"
-                        elif action_roll < 0.45:
-                            shares = int(shares_prev * inst_rng.uniform(1.05, 1.6))
-                            action = "Increased"
-                        elif action_roll < 0.75:
-                            shares = int(shares_prev * inst_rng.uniform(0.5, 0.95))
-                            action = "Decreased"
-                        else:
-                            shares = shares_prev
-                            action = "Held"
-                        chg_pct = round(((shares - shares_prev) / shares_prev) * 100, 1) if shares_prev else 0.0
-                    holdings.append({
-                        "filer": inst, "ticker": t, "quarter": label,
-                        "shares": shares, "value": round(shares * price, 0),
-                        "change_pct": chg_pct, "action": action,
-                    })
-                    shares_prev = shares if shares > 0 else inst_rng.randint(200_000, 9_000_000)
-        latest_q = quarters[-1]
-        latest = [h for h in holdings if h["quarter"] == latest_q]
-        latest.sort(key=lambda h: h["value"], reverse=True)
-        return {"quarters": quarters, "latest_quarter": latest_q, "holdings": holdings, "latest": latest}
-
-    def thirteen_f_for_ticker(self, ticker):
-        data = self.thirteen_f()
-        ticker = ticker.upper()
-        quarter_order = {q: i for i, q in enumerate(data["quarters"])}
-        rows = [h for h in data["holdings"] if h["ticker"] == ticker]
-        rows.sort(key=lambda h: (quarter_order[h["quarter"]], -h["value"]))
+        picks = inst_rng.sample(tickers, k=inst_rng.randint(12, 22))
+        rows = []
+        for t in picks:
+            price = self.closes[t][-1]
+            shares = inst_rng.randint(200_000, 9_000_000)
+            for q in quarters:
+                roll = inst_rng.random()
+                if roll < 0.08:
+                    shares = 0
+                elif roll < 0.40:
+                    shares = int(shares * inst_rng.uniform(1.05, 1.6))
+                elif roll < 0.70:
+                    shares = int(shares * inst_rng.uniform(0.5, 0.95))
+                rows.append({
+                    "filer": institution, "ticker": t, "quarter": q,
+                    "shares": shares, "value": round(shares * price),
+                })
+                if shares == 0:
+                    shares = inst_rng.randint(200_000, 9_000_000)
         return rows
 
+    def thirteen_f(self):
+        if self._thirteenf_cache is not None:
+            return self._thirteenf_cache
+
+        quarters_hint = self._quarter_labels_back(QUARTER_LABELS_BACK)
+        raw_rows = []
+        sources = {}
+        for institution in INSTITUTIONS:
+            live_rows = None
+            if self.mode != "simulated":
+                live_rows = SecEdgarProvider.fetch_institution_holdings(
+                    institution, self.meta, max_quarters=QUARTER_LABELS_BACK
+                )
+            if live_rows:
+                raw_rows.extend(live_rows)
+                sources[institution] = "live"
+            else:
+                raw_rows.extend(self._synthetic_raw_holdings_for(institution, quarters_hint))
+                sources[institution] = "simulated"
+
+        holdings = _finalize_holdings(raw_rows)
+        all_quarters = sorted({h["quarter"] for h in holdings}, key=quarter_sort_key)
+        latest_quarter = all_quarters[-1] if all_quarters else None
+        latest = [h for h in holdings if h["quarter"] == latest_quarter]
+        latest.sort(key=lambda h: h["value"], reverse=True)
+
+        self._thirteenf_cache = {
+            "quarters": all_quarters,
+            "latest_quarter": latest_quarter,
+            "holdings": holdings,
+            "latest": latest,
+            "sources": sources,
+        }
+        return self._thirteenf_cache
+
+    def thirteen_f_for_ticker(self, ticker):
+        ticker = ticker.upper()
+        data = self.thirteen_f()
+        rows = [h for h in data["holdings"] if h["ticker"] == ticker]
+        rows.sort(key=lambda h: (quarter_sort_key(h["quarter"]), -h["value"]))
+        return rows
+
+    # --------------------------------------------------------- sectors ----
     def sector_summary(self):
         rows = self.universe_rows()
         by_sector = {}
@@ -483,22 +565,43 @@ class Market:
                 f"among Stage 1 base-building names."
             )
         thirteen_f = self.thirteen_f()
-        increases = [h for h in thirteen_f["latest"] if h["action"] == "Increased"]
+        increases = [h for h in thirteen_f["latest"] if h["action"] in ("Increased", "New")]
         increases.sort(key=lambda h: h["value"], reverse=True)
         if increases:
             top_inc = increases[0]
+            verb = "opened a new position in" if top_inc["action"] == "New" else "increased its stake in"
             lines.append(
-                f"{top_inc['filer']} increased its {top_inc['ticker']} stake by "
-                f"{top_inc['change_pct']}% in {top_inc['quarter']} (13F)."
+                f"{top_inc['filer']} {verb} {top_inc['ticker']} "
+                f"({top_inc['change_pct']:+.1f}%) in {top_inc['quarter']} (13F)."
             )
         return lines
 
+    # --------------------------------------------------------- sources ----
+    def source_summary(self):
+        price_counts = {"live": 0, "simulated": 0}
+        for s in self.price_source.values():
+            price_counts[s] = price_counts.get(s, 0) + 1
+        f13 = self.thirteen_f()
+        f13_counts = {"live": 0, "simulated": 0}
+        for s in f13["sources"].values():
+            f13_counts[s] = f13_counts.get(s, 0) + 1
+        return {"mode": self.mode, "prices": price_counts, "thirteen_f": f13_counts}
+
 
 _MARKET_CACHE = None
+_MARKET_LOCK = threading.Lock()
 
 
 def get_market():
     global _MARKET_CACHE
     if _MARKET_CACHE is None:
-        _MARKET_CACHE = Market()
+        with _MARKET_LOCK:
+            if _MARKET_CACHE is None:
+                _MARKET_CACHE = Market()
     return _MARKET_CACHE
+
+
+def reset_market_cache():
+    global _MARKET_CACHE
+    with _MARKET_LOCK:
+        _MARKET_CACHE = None
