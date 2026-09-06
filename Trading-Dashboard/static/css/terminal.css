@@ -297,12 +297,14 @@ table.grid tbody tr.selected { background: #1a1305; }
 .detail-panel { position: sticky; top: 10px; min-width: 0; overflow-x: auto; }
 .detail-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; display: flex; gap: 10px; flex-wrap: wrap; }
 .detail-meta b { color: var(--text); }
+.tv-chart-container { width: 100%; height: 360px; background: #000; border: 1px solid var(--border); }
 #chartCanvas { width: 100%; height: 220px; background: #000; border: 1px solid var(--border); }
-.chart-legend { display: flex; gap: 14px; font-size: 10px; color: var(--text-dim); margin: 6px 0 10px; }
+.chart-legend { display: flex; gap: 14px; font-size: 10px; color: var(--text-dim); margin: 6px 0 4px; }
 .chart-legend .sw { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: middle; }
 .sw.up { background: var(--green); }
 .sw.down { background: var(--red); }
 .sw.ma { background: var(--cyan); }
+.chart-fallback-note { font-size: 10px; color: var(--amber-dim); margin-bottom: 10px; }
 .sub-title { font-size: 11px; color: var(--amber-dim); letter-spacing: 1px; margin: 10px 0 6px; }
 .grid-compact td, .grid-compact th { padding: 4px 6px; font-size: 11px; }
 

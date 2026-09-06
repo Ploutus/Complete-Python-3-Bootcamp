@@ -108,11 +108,15 @@
       <section class="panel detail-panel">
         <h2 class="panel-title" id="detailTitle">VÆLG EN AKTIE</h2>
         <div id="detailMeta" class="detail-meta"></div>
-        <canvas id="chartCanvas" width="640" height="360"></canvas>
-        <div class="chart-legend">
-          <span><i class="sw up"></i>Op-uge</span>
-          <span><i class="sw down"></i>Ned-uge</span>
-          <span><i class="sw ma"></i>30W MA</span>
+        <div id="tvChartContainer" class="tv-chart-container"></div>
+        <div id="fallbackChart" class="hidden">
+          <canvas id="chartCanvas" width="640" height="360"></canvas>
+          <div class="chart-legend">
+            <span><i class="sw up"></i>Op-uge</span>
+            <span><i class="sw down"></i>Ned-uge</span>
+            <span><i class="sw ma"></i>30W MA</span>
+          </div>
+          <div class="chart-fallback-note">TradingView-widget ikke tilgængelig — viser lokal graf ud fra prisdata.</div>
         </div>
         <h3 class="sub-title">13F INSTITUTIONEL AKTIVITET</h3>
         <table class="grid grid-compact" id="detail13f">

@@ -220,7 +220,7 @@
       ]);
       renderDetailMeta(ohlc, meta);
       state.lastOhlcBars = ohlc.bars;
-      drawChart(el("chartCanvas"), ohlc.bars);
+      renderChart(ohlc.tradingview_symbol, ohlc.bars);
       renderDetail13f(f13.holdings);
     } catch (e) {
       console.error(e);
@@ -255,6 +255,65 @@
       `;
       body.appendChild(tr);
     });
+  }
+
+  // ---------------- TradingView chart (with canvas fallback) ----------------
+  function showFallbackChart(bars) {
+    el("tvChartContainer").classList.add("hidden");
+    el("fallbackChart").classList.remove("hidden");
+    drawChart(el("chartCanvas"), bars);
+  }
+
+  function renderChart(tradingViewSymbol, bars) {
+    const tvContainer = el("tvChartContainer");
+    tvContainer.classList.remove("hidden");
+    el("fallbackChart").classList.add("hidden");
+    tvContainer.innerHTML = "";
+
+    if (!tradingViewSymbol) {
+      showFallbackChart(bars);
+      return;
+    }
+
+    const widgetDiv = document.createElement("div");
+    widgetDiv.className = "tradingview-widget-container__widget";
+    tvContainer.appendChild(widgetDiv);
+
+    const script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.async = true;
+    script.text = JSON.stringify({
+      autosize: true,
+      symbol: tradingViewSymbol,
+      interval: "W",
+      timezone: "Etc/UTC",
+      theme: "dark",
+      style: "1",
+      locale: "da_DK",
+      toolbar_bg: "#0b0f14",
+      hide_side_toolbar: true,
+      allow_symbol_change: false,
+      studies: ["MASimple@tv-basicstudies"],
+      studies_overrides: { "moving average.length": 30 },
+      support_host: "https://www.tradingview.com",
+    });
+
+    let settled = false;
+    const fallback = () => {
+      if (settled) return;
+      settled = true;
+      showFallbackChart(bars);
+    };
+    script.onerror = fallback;
+    tvContainer.appendChild(script);
+
+    // TradingView's embed script injects an <iframe> once it loads successfully.
+    // If that never happens (offline, ad-blocker, s3.tradingview.com unreachable),
+    // fall back to our own canvas chart instead of showing a permanently empty box.
+    setTimeout(() => {
+      if (!settled && !tvContainer.querySelector("iframe")) fallback();
+    }, 4000);
   }
 
   function drawChart(canvas, bars) {
@@ -430,7 +489,8 @@
     window.addEventListener("resize", () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (state.lastOhlcBars) drawChart(el("chartCanvas"), state.lastOhlcBars);
+        const fallbackActive = !el("fallbackChart").classList.contains("hidden");
+        if (fallbackActive && state.lastOhlcBars) drawChart(el("chartCanvas"), state.lastOhlcBars);
       }, 150);
     });
   }

@@ -111,6 +111,29 @@ STAGE_LABELS = {
     4: "Stage 4 · Declining",
 }
 
+# Best-effort primary-listing exchange per ticker, used only to qualify the
+# symbol passed to the TradingView chart widget (e.g. "NASDAQ:AAPL"). Not
+# used for any price/analytics logic. If a ticker's chart shows the wrong
+# instrument, fix its exchange here.
+TICKER_EXCHANGE = {
+    "AAPL": "NASDAQ", "MSFT": "NASDAQ", "NVDA": "NASDAQ", "AVGO": "NASDAQ", "ORCL": "NYSE",
+    "GOOGL": "NASDAQ", "META": "NASDAQ", "NFLX": "NASDAQ", "DIS": "NYSE", "TMUS": "NASDAQ",
+    "AMZN": "NASDAQ", "TSLA": "NASDAQ", "HD": "NYSE", "MCD": "NYSE", "NKE": "NYSE",
+    "PG": "NYSE", "KO": "NYSE", "PEP": "NASDAQ", "WMT": "NYSE", "COST": "NASDAQ",
+    "JPM": "NYSE", "BAC": "NYSE", "GS": "NYSE", "MS": "NYSE", "V": "NYSE",
+    "UNH": "NYSE", "JNJ": "NYSE", "LLY": "NYSE", "PFE": "NYSE", "ABBV": "NYSE",
+    "CAT": "NYSE", "BA": "NYSE", "HON": "NASDAQ", "UPS": "NYSE", "GE": "NYSE",
+    "XOM": "NYSE", "CVX": "NYSE", "COP": "NYSE", "SLB": "NYSE", "OXY": "NYSE",
+    "LIN": "NASDAQ", "APD": "NYSE", "ECL": "NYSE", "NEM": "NYSE", "FCX": "NYSE",
+    "NEE": "NYSE", "DUK": "NYSE", "SO": "NYSE", "D": "NYSE", "AEP": "NASDAQ",
+    "PLD": "NYSE", "AMT": "NYSE", "EQIX": "NASDAQ", "SPG": "NYSE", "O": "NYSE",
+}
+
+
+def tradingview_symbol(ticker):
+    exchange = TICKER_EXCHANGE.get(ticker)
+    return f"{exchange}:{ticker}" if exchange else ticker
+
 
 def _seed_for(name: str) -> int:
     return int(hashlib.sha256(name.encode()).hexdigest(), 16) % (2 ** 32)
@@ -417,6 +440,7 @@ class Market:
             "stage": self.stage[ticker], "stage_label": STAGE_LABELS[self.stage[ticker]],
             "rs_rating": self.rs_today.get(ticker, 50),
             "data_source": self.price_source.get(ticker, "simulated"),
+            "tradingview_symbol": tradingview_symbol(ticker),
             "bars": bars,
         }
 
