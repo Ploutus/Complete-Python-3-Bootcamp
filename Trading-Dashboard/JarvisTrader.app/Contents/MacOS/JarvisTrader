@@ -1,0 +1,38 @@
+#!/bin/bash
+# Launcher: starts the dashboard's own server.py and opens the browser once
+# it responds. Runs via `exec` so this process *is* the app as far as the
+# Dock/Cmd+Q are concerned -- quitting sends SIGTERM to server.py, which
+# shuts down cleanly (see the signal handler in server.py).
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../Resources/app" && pwd)"
+cd "$DIR" || exit 1
+
+PYTHON="$(command -v python3 || true)"
+if [ -z "$PYTHON" ]; then
+  osascript -e 'display alert "Python 3 mangler" message "Jarvis Trader kraever Python 3, som ikke blev fundet paa denne Mac. Installer det fra python.org og proev igen." as critical' >/dev/null 2>&1
+  exit 1
+fi
+
+PORT="${PORT:-8000}"
+export PORT
+
+LOG_DIR="$HOME/Library/Logs"
+mkdir -p "$LOG_DIR" 2>/dev/null || LOG_DIR="/tmp"
+LOG_FILE="$LOG_DIR/JarvisTrader.log"
+
+if curl -s -o /dev/null "http://localhost:$PORT/api/meta"; then
+  # already running (e.g. started earlier from a terminal) -- just show it
+  open "http://localhost:$PORT/"
+  exit 0
+fi
+
+(
+  for _ in $(seq 1 50); do
+    sleep 0.2
+    if curl -s -o /dev/null "http://localhost:$PORT/api/meta"; then
+      open "http://localhost:$PORT/"
+      break
+    fi
+  done
+) &
+
+exec "$PYTHON" server.py >>"$LOG_FILE" 2>&1

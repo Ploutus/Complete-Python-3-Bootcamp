@@ -23,8 +23,50 @@ small dot next to each ticker/13F row shows its own source.
 > automatic per-item fallback means the dashboard is fully usable either
 > way — **please do a quick local smoke test** (run it with internet
 > access and check the top-bar badge turns green) after pulling this.
+>
+> The same applies to `JarvisTrader.app`: this sandbox is Linux, so the
+> `.app` bundle and its launcher script were built and verified here by
+> running the actual launcher logic and `server.py`'s SIGTERM handling
+> directly (confirmed: it starts the server, waits for it to respond,
+> would call macOS's `open` on the right URL, and shuts down cleanly on
+> a terminate signal) — but `open`, `osascript`, Gatekeeper, and the Dock
+> itself are macOS-only and have not been exercised on a real Mac. It
+> should just work per the steps below; if double-clicking it does
+> nothing or the browser never opens, check `~/Library/Logs/JarvisTrader.log`
+> — if that's empty or missing, the app isn't finding `python3`.
 
 ## Run it
+
+### macOS: as a regular app
+
+`JarvisTrader.app` in this folder is a self-contained double-clickable
+app — no terminal needed day-to-day.
+
+1. Pull/download this branch, then in Finder go into `Trading-Dashboard/`.
+2. **First launch only:** macOS blocks unsigned apps by default. Either
+   right-click `JarvisTrader.app` → **Open** → **Open** in the dialog, or
+   if it says the app "cannot be opened", go to **System Settings →
+   Privacy & Security**, scroll down, and click **Open Anyway** next to
+   the Jarvis Trader entry, then launch it again.
+3. Double-click it. Your browser opens to the dashboard automatically —
+   it needs a moment the very first time.
+4. It behaves like any other app after that: it sits in the Dock while
+   running, and **Cmd+Q** (or Dock icon → Quit) shuts the server down
+   cleanly. You can drag `JarvisTrader.app` anywhere (Desktop,
+   Applications) — it's fully self-contained.
+
+Requires Python 3 to already be on the Mac (macOS normally has it, or
+installs it on first `python3` use via the Xcode Command Line Tools
+prompt; otherwise get it from python.org). If it's missing, the app shows
+an alert instead of silently failing.
+
+If you change the dashboard's source files, regenerate the app with
+`./build_mac_app.sh` — it always rebuilds `JarvisTrader.app` from the
+current `server.py` / `data_engine.py` / `providers.py` / `ai_analyst.py`
+/ `static/`, which stay the actual source of truth (nothing inside the
+`.app` should be hand-edited).
+
+### Any OS: from the terminal
 
 No third-party packages required to run the dashboard — pure Python 3
 standard library on the backend, vanilla HTML/CSS/JS on the frontend.
