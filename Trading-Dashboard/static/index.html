@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS // TRADING TERMINAL</title>
+<link rel="stylesheet" href="/css/terminal.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◆</span>
+      <span class="brand-text">JARVIS<span class="brand-thin">TRADER</span></span>
+    </div>
+    <div class="search-wrap">
+      <input id="tickerSearch" type="text" placeholder="SØG TICKER — fx AAPL, NVDA…" autocomplete="off">
+      <div id="searchResults" class="search-results hidden"></div>
+    </div>
+    <div class="topbar-right">
+      <span id="clock" class="clock">--:--:--</span>
+      <span class="badge badge-demo" title="Alle kurser, RS-ratings, stages og 13F-data er simulerede">SIMULERET DATA</span>
+    </div>
+  </header>
+
+  <div id="insightsTicker" class="insights-ticker">
+    <div class="insights-ticker-inner" id="insightsTickerInner">Indlæser AI-analyse…</div>
+  </div>
+
+  <main class="layout">
+    <aside class="col col-left">
+      <section class="panel">
+        <h2 class="panel-title">STAGE ANALYSE <span class="panel-sub">Weinstein 1–4</span></h2>
+        <div id="stageCards" class="stage-cards"></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">SEKTOR STYRKE <span class="panel-sub">RS · dag/dag</span></h2>
+        <div id="sectorList" class="sector-list"></div>
+      </section>
+    </aside>
+
+    <section class="col col-center">
+      <div class="tabs">
+        <button class="tab active" data-tab="screener">SCREENER</button>
+        <button class="tab" data-tab="thirteenf">13F FILINGS</button>
+      </div>
+
+      <div id="filterBar" class="filter-bar hidden">
+        <span id="filterLabel"></span>
+        <div id="stageSectorBreakdown" class="stage-sector-breakdown"></div>
+        <button id="clearFilter" class="clear-filter">✕ RYD FILTER</button>
+      </div>
+
+      <div id="screenerView" class="tab-view">
+        <table class="grid" id="stockGrid">
+          <thead>
+            <tr>
+              <th data-sort="rs_rating" class="sortable sorted-desc">RS</th>
+              <th data-sort="ticker" class="sortable">TICKER</th>
+              <th>NAVN</th>
+              <th data-sort="sector" class="sortable">SEKTOR</th>
+              <th data-sort="stage" class="sortable">STAGE</th>
+              <th data-sort="price" class="sortable">KURS</th>
+              <th data-sort="day_chg_pct" class="sortable">1D%</th>
+              <th data-sort="week_chg_pct" class="sortable">1W%</th>
+            </tr>
+          </thead>
+          <tbody id="stockGridBody"></tbody>
+        </table>
+      </div>
+
+      <div id="thirteenfView" class="tab-view hidden">
+        <div class="thirteenf-head">
+          <span id="thirteenfQuarter"></span>
+        </div>
+        <table class="grid" id="thirteenfGrid">
+          <thead>
+            <tr>
+              <th>FILER</th>
+              <th>TICKER</th>
+              <th>AKTIER</th>
+              <th>VÆRDI (USD)</th>
+              <th>ÆNDRING</th>
+              <th>HANDLING</th>
+            </tr>
+          </thead>
+          <tbody id="thirteenfGridBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="col col-right">
+      <section class="panel detail-panel">
+        <h2 class="panel-title" id="detailTitle">VÆLG EN AKTIE</h2>
+        <div id="detailMeta" class="detail-meta"></div>
+        <canvas id="chartCanvas" width="640" height="360"></canvas>
+        <div class="chart-legend">
+          <span><i class="sw up"></i>Op-uge</span>
+          <span><i class="sw down"></i>Ned-uge</span>
+          <span><i class="sw ma"></i>30W MA</span>
+        </div>
+        <h3 class="sub-title">13F INSTITUTIONEL AKTIVITET</h3>
+        <table class="grid grid-compact" id="detail13f">
+          <thead><tr><th>FILER</th><th>KVARTAL</th><th>AKTIER</th><th>ÆNDRING</th></tr></thead>
+          <tbody id="detail13fBody"></tbody>
+        </table>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
